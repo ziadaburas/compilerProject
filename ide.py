@@ -14,13 +14,25 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 
 class ArabicCompilerIDE(QMainWindow):
+    # def __init__(self):
+    #     super().__init__()
+    #     self.current_file = None
+    #     self.dark_mode = True
+    #     self.init_ui()
+    #     self.setup_connections()
+
     def __init__(self):
         super().__init__()
         self.current_file = None
         self.dark_mode = True
+        self.waiting_for_input = False  # ← أضف هذا السطر
+        self.input_buffer = ""  # ← أضف هذا السطر
+        self.input_callback = None  # ← أضف هذا السطر
+        self.console_output=None
+        self.editor_widget= None
         self.init_ui()
         self.setup_connections()
-        
+
     def init_ui(self):
         """تهيئة واجهة المستخدم"""
         self.setWindowTitle("المترجم العربي - Arabic Compiler IDE")
@@ -306,8 +318,8 @@ class ArabicCompilerIDE(QMainWindow):
         
     def create_editor_area(self):
         """إنشاء منطقة المحرر"""
-        editor_widget = QWidget()
-        editor_layout = QVBoxLayout(editor_widget)
+        self.editor_widget = QWidget()
+        editor_layout = QVBoxLayout(self.editor_widget)
         editor_layout.setContentsMargins(0, 0, 0, 0)
         
         # شريط الأدوات للمحرر
@@ -352,13 +364,14 @@ class ArabicCompilerIDE(QMainWindow):
         
         editor_layout.addWidget(self.text_editor)
         
-        self.vertical_splitter.addWidget(editor_widget)
+        self.vertical_splitter.addWidget(self.editor_widget)
         
     def create_console_area(self):
         """إنشاء منطقة وحدة التحكم"""
         console_widget = QWidget()
         console_layout = QVBoxLayout(console_widget)
         console_layout.setContentsMargins(0, 0, 0, 0)
+        # في الدالة create_main_layout
         
         # شريط وحدة التحكم
         console_toolbar = QHBoxLayout()
@@ -381,7 +394,11 @@ class ArabicCompilerIDE(QMainWindow):
         self.console_output = QTextEdit()
         self.console_output.setReadOnly(True)
         self.console_output.setLayoutDirection(Qt.RightToLeft)
-        
+        self.console_output = QTextEdit()
+        self.console_output.setReadOnly(False)  # ← غيّر من True إلى False
+        self.console_output.setPlaceholderText("المخرجات والمدخلات ستظهر هنا...")
+        self.console_output.installEventFilter(self)  # ← أضف هذا السطر
+
         # خط وحدة التحكم
         console_font = QFont("Consolas", 10)
         if not console_font.exactMatch():
@@ -560,6 +577,97 @@ class ArabicCompilerIDE(QMainWindow):
             
     # وظائف التشغيل
     def run_code(self):
+        """تشغيل الكود مباشرة من الواجهة"""
+        try:
+            # مسح الكونسول
+            self.console_output.clear()
+            
+            # الحصول على الكود المصدري 
+            source_code = self.text_editor.toPlainText()
+            if not source_code.strip():
+                self.console_output.setPlainText("❌ لا يوجد كود للتشغيل!")
+                return
+            
+            # استيراد المكتبات الضرورية
+            from antlr4 import InputStream, CommonTokenStream
+            from ArabicGrammarLexer import ArabicGrammarLexer
+            from ArabicGrammarParser import ArabicGrammarParser
+            from semantic_analyzer import SemanticAnalyzer
+            from code_generator import CodeGenerator
+            
+            # التحليل اللغوي
+            input_stream = InputStream(source_code)
+            lexer = ArabicGrammarLexer(input_stream)
+            token_stream = CommonTokenStream(lexer)
+            parser = ArabicGrammarParser(token_stream)
+            
+            # بناء شجرة AST
+            tree = parser.program()
+            
+            # التحليل الدلالي
+            analyzer = SemanticAnalyzer()
+            ast = analyzer.visit(tree)
+            
+            if analyzer.errors:
+                error_msg = "\n".join([f"❌ {err}" for err in analyzer.errors])
+                self.console_output.setPlainText(error_msg)
+                return
+            
+            # توليد الكود
+            generator = CodeGenerator()
+            python_code = generator.generate(ast)
+            
+            # تنفيذ الكود المولد
+            self.execute_generated_code(python_code)
+            
+        except Exception as e:
+            self.console_output.setPlainText(f"❌ خطأ في التنفيذ:\n{str(e)}")
+    def execute_generated_code(self, python_code):
+        """تنفيذ الكود البايثون المولد داخل الواجهة"""
+        import io
+        import sys
+        from contextlib import redirect_stdout, redirect_stderr
+        
+        # إنشاء بيئة تنفيذ معزولة
+        namespace = {
+            '__name__': '__main__',
+            '__builtins__': __builtins__,
+            'print': self.console_print,  # استبدال print
+            'input': self.console_input,  # استبدال input
+            'math': __import__('math'),
+            'sys': __import__('sys')
+        }
+        
+        try:
+            # تنفيذ الكود
+            exec(python_code, namespace)
+            
+            # تشغيل main إذا كانت موجودة
+            if 'main' in namespace:
+                namespace['main']()
+                
+        except Exception as e:
+            self.console_output.insertPlainText(f"\n❌ خطأ في التنفيذ: {str(e)}\n")
+    def console_print(self, *args, **kwargs):
+        """دالة طباعة مخصصة للكونسول"""
+        # تحويل كل المدخلات إلى نص
+        text = " ".join(str(arg) for arg in args)
+        
+        # إضافة النص للكونسول
+        self.console_output.insertPlainText(text)
+        
+        # إضافة سطر جديد إذا لم يكن end محددًا
+        if kwargs.get('end', '\n') == '\n':
+            self.console_output.insertPlainText('\n')
+        
+        # التمرير للأسفل
+        scrollbar = self.console_output.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        
+        # تحديث الواجهة
+        QApplication.processEvents()
+
+    def run_code1(self):
         """تشغيل الكود"""
         code = self.text_editor.toPlainText().strip()
         if not code:
@@ -1264,6 +1372,57 @@ class ArabicCompilerIDE(QMainWindow):
         
         self.setStyleSheet(light_style)
         self.theme_toggle_btn.setText("🌙")
+    def eventFilter(self, obj, event):
+        """معالج الأحداث للكونسول - للإدخال التفاعلي"""
+        if obj == self.console_output and self.waiting_for_input:
+            if event.type() == QEvent.KeyPress:
+                if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                    # عند الضغط على Enter
+                    self.waiting_for_input = False
+                    if self.input_callback:
+                        self.input_callback(self.input_buffer)
+                    self.input_buffer = ""
+                    return True
+                elif event.key() == Qt.Key_Backspace:
+                    # معالجة الحذف
+                    if self.input_buffer:
+                        self.input_buffer = self.input_buffer[:-1]
+                    return False
+                elif len(event.text()) > 0 and event.text().isprintable():
+                    # إضافة الحرف المكتوب
+                    self.input_buffer += event.text()
+            return False
+        return super().eventFilter(obj, event)
+    def console_input(self, prompt=""):
+        """دالة الإدخال من الكونسول - تحاكي input()"""
+        from PyQt5.QtCore import QEventLoop
+        
+        # طباعة رسالة الطلب
+        if prompt:
+            self.console_output.insertPlainText(prompt)
+        
+        # تفعيل وضع الإدخال
+        self.waiting_for_input = True
+        self.input_buffer = ""
+        result = None
+        
+        # حلقة انتظار
+        loop = QEventLoop()
+        
+        def callback(value):
+            nonlocal result
+            result = value
+            loop.quit()
+        
+        self.input_callback = callback
+        self.console_output.setFocus()
+        loop.exec_()
+        
+        # طباعة السطر الجديد
+        self.console_output.insertPlainText("\n")
+        return result
+
+
 
 def main():
     """الدالة الرئيسية"""

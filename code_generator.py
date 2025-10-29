@@ -79,15 +79,15 @@ class CodeGenerator:
     
     def visit_ProgramNode(self, node):
         """توليد كود البرنامج - Generate program code"""
-        self.emit("#!/usr/bin/env python3")
-        self.emit("# -*- coding: utf-8 -*-")
-        self.emit(f'"""')
-        self.emit(f"برنامج: {node.name}")
-        self.emit(f"Program: {node.name}")
-        self.emit(f"مولّد تلقائياً من مترجم اللغة العربية البرمجية")
-        self.emit(f"Auto-generated from Arabic Programming Language Compiler")
-        self.emit(f'"""')
-        self.emit_blank()
+        # self.emit("#!/usr/bin/env python3")
+        # self.emit("# -*- coding: utf-8 -*-")
+        # self.emit(f'"""')
+        # self.emit(f"برنامج: {node.name}")
+        # self.emit(f"Program: {node.name}")
+        # self.emit(f"مولّد تلقائياً من مترجم اللغة العربية البرمجية")
+        # self.emit(f"Auto-generated from Arabic Programming Language Compiler")
+        # self.emit(f'"""')
+        # self.emit_blank()
         
         # Add imports
         self.emit("import sys")
@@ -102,6 +102,7 @@ class CodeGenerator:
         self.emit("if __name__ == '__main__':")
         self.increase_indent()
         self.emit("main()")
+        self.emit("print('exit')")
         self.decrease_indent()
     
     def visit_BlockNode(self, node):
