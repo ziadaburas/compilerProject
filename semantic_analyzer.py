@@ -374,29 +374,46 @@ class SemanticAnalyzer(ArabicGrammarVisitor):
             self.add_error(f"الإجراء '{proc_name}' معرّف مسبقاً", ctx)
             return None
         
-        # Get parameters
-        params = []
+
+        # Get parameters as AST ParamDefNode list
+        ast_params = []
         if proc_header.formal_params_list():
-            params = self.visit(proc_header.formal_params_list())
-        
-        # Add procedure to symbol table
+            ast_params = self.visit(proc_header.formal_params_list())
+
+        # Build symbol table ParamSymbol list from AST params
+        proc_params_symbols = []
+        for pnode in ast_params:
+            # pnode.names is a list of names for this param group
+            for pname in pnode.names:
+                # Resolve data type for the parameter
+                dtype = self.symbol_table.lookup_type(pnode.data_type)
+                if not dtype:
+                    dtype = TypeInfo(pnode.data_type)
+
+                proc_params_symbols.append(ParamSymbol(
+                    name=pname,
+                    data_type=dtype,
+                    pass_mode=pnode.pass_mode
+                ))
+
+        # Add procedure to symbol table (store ParamSymbol list)
         symbol = Symbol(
             name=proc_name,
             symbol_type='PROCEDURE',
-            params=params
+            params=proc_params_symbols
         )
         self.symbol_table.insert(symbol)
-        
-        # Enter new scope for procedure body
+
+        # Enter new scope for procedure body and add parameters into scope
         self.symbol_table.enter_scope()
         self.current_procedure = proc_name
-        
-        # Add parameters to new scope
-        for param in params:
+
+        # Add parameters to new scope as symbols
+        for psym in proc_params_symbols:
             self.symbol_table.insert(Symbol(
-                name=param.name,
+                name=psym.name,
                 symbol_type='PARAMETER',
-                data_type=param.data_type
+                data_type=psym.data_type
             ))
         
         # Visit procedure body
@@ -408,7 +425,7 @@ class SemanticAnalyzer(ArabicGrammarVisitor):
         
         return ProcedureDefNode(
             name=proc_name,
-            params=params,
+            params=ast_params,
             block=proc_block,
             line=ctx.start.line,
             column=ctx.start.column
@@ -434,22 +451,17 @@ class SemanticAnalyzer(ArabicGrammarVisitor):
         
         # Get variables group
         var_group = self.visit(ctx.variables_group())
-        
-        # Create parameter symbols
-        params = []
-        for name in var_group.names:
-            data_type = self.symbol_table.lookup_type(var_group.data_type)
-            if not data_type:
-                data_type = TypeInfo(var_group.data_type)
-            
-            param = ParamSymbol(
-                name=name,
-                data_type=data_type,
-                pass_mode=pass_mode
-            )
-            params.append(param)
-        
-        return params
+
+        # Create AST ParamDefNode for this parameter group
+        param_node = ParamDefNode(
+            names=var_group.names,
+            data_type=var_group.data_type,
+            pass_mode=pass_mode,
+            line=ctx.start.line,
+            column=ctx.start.column
+        )
+
+        return [param_node]
     
     def visitProcedure_block(self, ctx):
         """زيارة كتلة إجراء - Visit procedure block"""

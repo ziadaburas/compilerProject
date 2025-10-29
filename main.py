@@ -1,11 +1,14 @@
 
 """
-Main Program for Arabic Semantic Analyzer
-البرنامج الرئيسي للمحلل الدلالي
+Main Program for Arabic Programming Language Compiler
+البرنامج الرئيسي للمترجم - يشمل التحليل التوليد والتنفيذ
 """
 
 import sys
+import os
+import subprocess
 from antlr4 import *
+from antlr4.error.ErrorListener import ErrorListener
 
 # Import generated ANTLR files
 try:
@@ -27,278 +30,268 @@ except ImportError:
 
 from semantic_analyzer import SemanticAnalyzer
 from symbol_table import SemanticError
+from code_generator import generate_code
 
 
-def analyze_program(source_code, verbose=False):
+def compile_and_run(source_code, verbose=False, execute=True, output_file=None):
     """
-    تحليل كود مصدري - Analyze source code
+    تحليل وتوليد وتنفيذ كود مصدري - Compile and execute source code
     
     Args:
-        source_code: نص الكود المصدري - Source code text
-        verbose: طباعة معلومات تفصيلية - Print detailed information
+        source_code: الكود المصدري - Source code
+        verbose: عرض تفاصيل إضافية - Show verbose output
+        execute: تنفيذ الكود المولّد - Execute generated code
+        output_file: ملف الإخراج - Output file
     
     Returns:
-        tuple: (ast_root, analyzer, success)
+        tuple: (success, generated_code, ast, errors)
     """
+    
+    print("=" * 70)
+    print("مترجم اللغة العربية البرمجية")
+    print("Arabic Programming Language Compiler")
+    print("=" * 70)
+    print()
+    
+    # ===== المرحلة 1: التحليل اللغوي (Lexical Analysis) =====
+    if verbose:
+        print("▶ المرحلة 1: التحليل اللغوي")
+        print("▶ Phase 1: Lexical Analysis")
+        print("-" * 70)
+    
     try:
-        # Create input stream
         input_stream = InputStream(source_code)
-        
-        # Create lexer
         lexer = ArabicGrammarLexer(input_stream)
-        
-        # Create token stream
         token_stream = CommonTokenStream(lexer)
         
-        # Create parser
+        if verbose:
+            token_stream.fill()
+            print(f"✓ تم التعرف على {len(token_stream.tokens)} رمز")
+            print(f"✓ Recognized {len(token_stream.tokens)} tokens")
+            print()
+            
+            # Reset stream for parser
+            input_stream = InputStream(source_code)
+            lexer = ArabicGrammarLexer(input_stream)
+            token_stream = CommonTokenStream(lexer)
+        
+    except Exception as e:
+        print(f"✗ خطأ في التحليل اللغوي: {e}")
+        print(f"✗ Lexical analysis error: {e}")
+        return False, None, None, [str(e)]
+    
+    # ===== المرحلة 2: التحليل النحوي (Syntax Analysis) =====
+    if verbose:
+        print("▶ المرحلة 2: التحليل النحوي")
+        print("▶ Phase 2: Syntax Analysis")
+        print("-" * 70)
+    
+    try:
         parser = ArabicGrammarParser(token_stream)
         
-        # Parse the program
-        if verbose:
-            print("=" * 70)
-            print("بدء التحليل النحوي...")
-            print("Starting syntactic analysis...")
-            print("=" * 70)
+        # Custom error listener
+        parser.removeErrorListeners()
+        error_listener = CustomErrorListener()
+        parser.addErrorListener(error_listener)
         
+        # Parse
         parse_tree = parser.program()
         
-        if verbose:
-            print("✓ التحليل النحوي نجح")
-            print("✓ Syntactic analysis succeeded\n")
-        
-        # Create semantic analyzer
-        analyzer = SemanticAnalyzer()
-        
-        if verbose:
-            print("=" * 70)
-            print("بدء التحليل الدلالي...")
-            print("Starting semantic analysis...")
-            print("=" * 70)
-        
-        # Visit parse tree to build AST and perform semantic checks
-        ast_root = analyzer.visit(parse_tree)
-        
-        # Check for semantic errors
-        if analyzer.errors:
-            if verbose:
-                print("\n✗ فشل التحليل الدلالي - تم اكتشاف أخطاء:")
-                print("✗ Semantic analysis failed - errors detected:\n")
-            
-            for error in analyzer.errors:
-                print(f"  • {error}")
-            
-            return ast_root, analyzer, False
+        if error_listener.errors:
+            print("✗ أخطاء نحوية:")
+            print("✗ Syntax errors:")
+            for error in error_listener.errors:
+                print(f"  {error}")
+            return False, None, None, error_listener.errors
         
         if verbose:
-            print("✓ التحليل الدلالي نجح - لا توجد أخطاء!")
-            print("✓ Semantic analysis succeeded - no errors!\n")
+            print("✓ التحليل النحوي ناجح")
+            print("✓ Syntax analysis successful")
+            print()
         
-        return ast_root, analyzer, True
-    
-    except SemanticError as e:
-        print(f"\n✗ خطأ دلالي: {e}")
-        print(f"✗ Semantic error: {e}")
-        return None, None, False
-    
     except Exception as e:
-        print(f"\n✗ خطأ غير متوقع: {e}")
-        print(f"✗ Unexpected error: {e}")
+        print(f"✗ خطأ في التحليل النحوي: {e}")
+        print(f"✗ Syntax analysis error: {e}")
+        return False, None, None, [str(e)]
+    
+    # ===== المرحلة 3: التحليل الدلالي (Semantic Analysis) =====
+    if verbose:
+        print("▶ المرحلة 3: التحليل الدلالي")
+        print("▶ Phase 3: Semantic Analysis")
+        print("-" * 70)
+    
+    try:
+        analyzer = SemanticAnalyzer()
+        ast = analyzer.visit(parse_tree)
+        
+        if analyzer.errors:
+            print("✗ أخطاء دلالية:")
+            print("✗ Semantic errors:")
+            for error in analyzer.errors:
+                print(f"  {error.format_error()}")
+            return False, None, ast, analyzer.errors
+        
+        if verbose:
+            print("✓ التحليل الدلالي ناجح")
+            print("✓ Semantic analysis successful")
+            print(f"  - البرنامج: {ast.name}")
+            print(f"  - Program: {ast.name}")
+            
+            if ast.block.constants:
+                print(f"  - ثوابت: {len(ast.block.constants)}")
+                print(f"  - Constants: {len(ast.block.constants)}")
+            
+            if ast.block.variables:
+                print(f"  - متغيرات: {len(ast.block.variables)}")
+                print(f"  - Variables: {len(ast.block.variables)}")
+            
+            if ast.block.procedures:
+                print(f"  - إجراءات: {len(ast.block.procedures)}")
+                print(f"  - Procedures: {len(ast.block.procedures)}")
+            
+            print()
+        
+    except Exception as e:
+        print(f"✗ خطأ في التحليل الدلالي: {e}")
+        print(f"✗ Semantic analysis error: {e}")
         import traceback
         traceback.print_exc()
-        return None, None, False
-
-
-def print_symbol_table(analyzer):
-    """طباعة جدول الرموز - Print symbol table"""
-    print("\n" + "=" * 70)
-    print("جدول الرموز - Symbol Table")
+        return False, None, None, [str(e)]
+    
+    # ===== المرحلة 4: توليد الكود (Code Generation) =====
+    if verbose:
+        print("▶ المرحلة 4: توليد الكود")
+        print("▶ Phase 4: Code Generation")
+        print("-" * 70)
+    
+    try:
+        # Determine output file
+        if not output_file:
+            output_file = f"{ast.name}_generated.py"
+        
+        generated_code = generate_code(ast, output_file)
+        
+        if verbose:
+            print(f"✓ تم توليد الكود بنجاح: {output_file}")
+            print(f"✓ Code generated successfully: {output_file}")
+            print(f"  - عدد الأسطر: {len(generated_code.splitlines())}")
+            print(f"  - Lines: {len(generated_code.splitlines())}")
+            print()
+        
+    except Exception as e:
+        print(f"✗ خطأ في توليد الكود: {e}")
+        print(f"✗ Code generation error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, None, ast, [str(e)]
+    
+    # ===== المرحلة 5: التنفيذ (Execution) =====
+    if execute:
+        if verbose:
+            print("▶ المرحلة 5: التنفيذ")
+            print("▶ Phase 5: Execution")
+            print("-" * 70)
+        
+        print()
+        print("=" * 70)
+        print("مخرجات البرنامج / Program Output:")
+        print("=" * 70)
+        print()
+        
+        try:
+            # Execute the generated code
+            result = subprocess.run(
+                [sys.executable, output_file],
+                capture_output=False,
+                text=True,
+                timeout=30
+            )
+            
+            print()
+            print("=" * 70)
+            
+            if result.returncode == 0:
+                print("✓ تم تنفيذ البرنامج بنجاح")
+                print("✓ Program executed successfully")
+            else:
+                print(f"✗ فشل التنفيذ - رمز الخروج: {result.returncode}")
+                print(f"✗ Execution failed - Exit code: {result.returncode}")
+            
+        except subprocess.TimeoutExpired:
+            print()
+            print("=" * 70)
+            print("✗ انتهت مهلة التنفيذ (30 ثانية)")
+            print("✗ Execution timeout (30 seconds)")
+        
+        except Exception as e:
+            print()
+            print("=" * 70)
+            print(f"✗ خطأ في التنفيذ: {e}")
+            print(f"✗ Execution error: {e}")
+    
     print("=" * 70)
-    print(analyzer.symbol_table)
+    return True, generated_code, ast, []
 
 
-def print_ast_summary(ast_root):
-    """طباعة ملخص شجرة AST - Print AST summary"""
-    if not ast_root:
-        return
+class CustomErrorListener(ErrorListener):
+    """مستمع الأخطاء المخصص - Custom error listener"""
     
-    print("\n" + "=" * 70)
-    print("ملخص شجرة البرنامج - Program AST Summary")
-    print("=" * 70)
-    print(f"البرنامج: {ast_root.name}")
-    print(f"Program: {ast_root.name}\n")
+    def __init__(self):
+        super().__init__()
+        self.errors = []
     
-    block = ast_root.block
-    print(f"  • الثوابت: {len(block.constants)} ثابت")
-    print(f"    Constants: {len(block.constants)}")
-    
-    print(f"  • الأنواع: {len(block.types)} نوع")
-    print(f"    Types: {len(block.types)}")
-    
-    print(f"  • المتغيرات: {len(block.variables)} مجموعة")
-    print(f"    Variables: {len(block.variables)} group(s)")
-    
-    print(f"  • الإجراءات: {len(block.procedures)} إجراء")
-    print(f"    Procedures: {len(block.procedures)}")
-    
-    if block.instructions:
-        stmt_count = len(block.instructions.statements) if hasattr(block.instructions, 'statements') else 0
-        print(f"  • التعليمات: {stmt_count} تعليمة")
-        print(f"    Instructions: {stmt_count}")
-
-
-# ==================== Example Programs ====================
-
-# مثال 1: برنامج بسيط - Simple program
-EXAMPLE_PROGRAM_1 = """
-برنامج حساب_المساحة؛
-    متغير
-        طول، عرض، مساحة: صحيح؛
-{
-    اقرا(طول)؛
-    اقرا(عرض)؛
-    مساحة = طول * عرض؛
-    اطبع(مساحة)
-}.
-"""
-
-# مثال 2: برنامج مع ثوابت وإجراءات - Program with constants and procedures
-EXAMPLE_PROGRAM_2 = """
-برنامج حساب_الدائرة؛
-    ثابت
-        باي = 3.14؛
-    
-    متغير
-        نصف_القطر: حقيقي؛
-        المساحة: حقيقي؛
-    
-    اجراء احسب_مساحة(بالمرجع س: حقيقي؛ بالقيمة ر: حقيقي)؛
-        متغير
-            نتيجة: حقيقي؛
-    {
-        نتيجة = باي * ر * ر؛
-        س = نتيجة
-    }؛
-{
-    اقرا(نصف_القطر)؛
-    احسب_مساحة(المساحة، نصف_القطر)؛
-    اطبع("المساحة: "، المساحة)
-}.
-"""
-
-# مثال 3: برنامج مع حلقات وشروط - Program with loops and conditions
-EXAMPLE_PROGRAM_3 = """
-برنامج حساب_المجموع؛
-    متغير
-        عداد، مجموع، عدد: صحيح؛
-{
-    مجموع = 0؛
-    كرر(عداد = 1 الى 10)
-    {
-        اقرا(عدد)؛
-        اذا(عدد > 0) فان
-            مجموع = مجموع + عدد
-    }؛
-    اطبع("المجموع: "، مجموع)
-}.
-"""
-
-# مثال 4: برنامج مع قوائم وسجلات - Program with lists and records
-EXAMPLE_PROGRAM_4 = """
-برنامج ادارة_طلاب؛
-    نوع
-        طالب = سجل {
-            الاسم: خيط_رمزي؛
-            العمر: صحيح؛
-            المعدل: حقيقي
-        }؛
-        قائمة_طلاب = قائمة[50] من طالب؛
-    
-    متغير
-        طلاب: قائمة_طلاب؛
-        فهرس: صحيح؛
-{
-    فهرس = 0؛
-    اقرا(طلاب[فهرس].الاسم)؛
-    اقرا(طلاب[فهرس].العمر)؛
-    اقرا(طلاب[فهرس].المعدل)؛
-    اطبع("الطالب: "، طلاب[فهرس].الاسم)
-}.
-"""
-
-# مثال 5: برنامج مع أخطاء دلالية - Program with semantic errors
-EXAMPLE_PROGRAM_WITH_ERRORS = """
-برنامج برنامج_خاطئ؛
-    متغير
-        س: صحيح؛
-        ص: حقيقي؛
-{
-    س = ص؛
-    ع = 10؛
-    اطبع(غير_معرف)؛
-    غير_موجود(س، ص)
-}.
-"""
+    def syntaxError(self, recognizer, offendingSymbol, line, column, msg, e):
+        error_msg = f"السطر {line}:{column} - {msg}"
+        self.errors.append(error_msg)
 
 
 def main():
     """البرنامج الرئيسي - Main program"""
-    print("\n" + "=" * 70)
-    print("محلل دلالي للغة البرمجة العربية")
-    print("Arabic Programming Language Semantic Analyzer")
-    print("=" * 70)
+    import argparse
     
-    # Choose which example to run
-    print("\nاختر مثال لتحليله:")
-    print("Choose an example to analyze:")
-    print("  1. برنامج بسيط (حساب المساحة)")
-    print("  2. برنامج مع ثوابت وإجراءات (حساب مساحة الدائرة)")
-    print("  3. برنامج مع حلقات وشروط (حساب المجموع)")
-    print("  4. برنامج مع قوائم وسجلات (إدارة الطلاب)")
-    print("  5. برنامج مع أخطاء دلالية")
+    parser = argparse.ArgumentParser(
+        description='مترجم اللغة العربية البرمجية - Arabic Programming Language Compiler',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+أمثلة / Examples:
+  python main_complete.py program.txt              # تجميع وتنفيذ ملف
+  python main_complete.py program.txt -v           # وضع مفصل
+  python main_complete.py program.txt -o output.py # تحديد ملف الإخراج
+  python main_complete.py program.txt --no-exec    # عدم التنفيذ
+        """
+    )
     
-    choice = input("\nأدخل رقم المثال (1-5): ").strip()
+    parser.add_argument('source_file', help='ملف المصدر العربي - Arabic source file')
+    parser.add_argument('-v', '--verbose', action='store_true', 
+                       help='عرض تفاصيل إضافية - Show verbose output')
+    parser.add_argument('-o', '--output', help='ملف الإخراج - Output file')
+    parser.add_argument('--no-exec', action='store_true',
+                       help='عدم تنفيذ الكود المولّد - Don\'t execute generated code')
     
-    programs = {
-        '1': ('حساب_المساحة', EXAMPLE_PROGRAM_1),
-        '2': ('حساب_الدائرة', EXAMPLE_PROGRAM_2),
-        '3': ('حساب_المجموع', EXAMPLE_PROGRAM_3),
-        '4': ('ادارة_طلاب', EXAMPLE_PROGRAM_4),
-        '5': ('برنامج_خاطئ', EXAMPLE_PROGRAM_WITH_ERRORS)
-    }
+    args = parser.parse_args()
     
-    if choice not in programs:
-        print("خيار غير صحيح!")
-        return
+    # Read source file
+    try:
+        with open(args.source_file, 'r', encoding='utf-8') as f:
+            source_code = f.read()
+    except FileNotFoundError:
+        print(f"✗ الملف غير موجود: {args.source_file}")
+        print(f"✗ File not found: {args.source_file}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"✗ خطأ في قراءة الملف: {e}")
+        print(f"✗ Error reading file: {e}")
+        sys.exit(1)
     
-    program_name, source_code = programs[choice]
+    # Compile and run
+    success, code, ast, errors = compile_and_run(
+        source_code,
+        verbose=args.verbose,
+        execute=not args.no_exec,
+        output_file=args.output
+    )
     
-    print(f"\n{'=' * 70}")
-    print(f"تحليل البرنامج: {program_name}")
-    print(f"Analyzing program: {program_name}")
-    print('=' * 70)
-    print("\nالكود المصدري:")
-    print("Source code:")
-    print(source_code)
-    
-    # Analyze the program
-    ast_root, analyzer, success = analyze_program(source_code, verbose=True)
-    
-    if success:
-        # Print symbol table
-        print_symbol_table(analyzer)
-        
-        # Print AST summary
-        print_ast_summary(ast_root)
-        
-        print("\n" + "=" * 70)
-        print("✓✓✓ نجح التحليل الدلالي بدون أخطاء!")
-        print("✓✓✓ Semantic analysis completed successfully!")
-        print("=" * 70)
-    else:
-        print("\n" + "=" * 70)
-        print("✗✗✗ فشل التحليل الدلالي")
-        print("✗✗✗ Semantic analysis failed")
-        print("=" * 70)
+    sys.exit(0 if success else 1)
 
 
 if __name__ == "__main__":
