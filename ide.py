@@ -1,26 +1,17 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-المترجم العربي (Arabic Compiler IDE)
-مشروع محاكي لبيئة تطوير متكاملة باللغة العربية
-"""
-
 import sys
 import os
 from datetime import datetime
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
+from compiler_analyzer import get_lexical_analysis, get_syntax_analysis, get_semantic_analysis
+from antlr4 import InputStream, CommonTokenStream
+from ArabicGrammarLexer import ArabicGrammarLexer
+from ArabicGrammarParser import ArabicGrammarParser
+from semantic_analyzer import SemanticAnalyzer
+from code_generator import CodeGenerator
 
 class ArabicCompilerIDE(QMainWindow):
-    # def __init__(self):
-    #     super().__init__()
-    #     self.current_file = None
-    #     self.dark_mode = True
-    #     self.init_ui()
-    #     self.setup_connections()
-
     def __init__(self):
         super().__init__()
         self.current_file = None
@@ -30,6 +21,10 @@ class ArabicCompilerIDE(QMainWindow):
         self.input_callback = None  # ← أضف هذا السطر
         self.console_output=None
         self.editor_widget= None
+        self.open_files = []  # قائمة الملفات المفتوحة
+        self.current_file_index = -1  # فهرس الملف الحالي
+        self.running_process = None  # العملية قيد التشغيل
+        self.is_running = False  # حالة التنفيذ
         self.init_ui()
         self.setup_connections()
 
@@ -147,11 +142,6 @@ class ArabicCompilerIDE(QMainWindow):
         stop_action.triggered.connect(self.stop_execution)
         run_menu.addAction(stop_action)
         
-        run_menu.addSeparator()
-        
-        settings_action = QAction("⚙️ إعدادات التشغيل", self)
-        settings_action.triggered.connect(self.run_settings)
-        run_menu.addAction(settings_action)
         
         # قائمة عرض
         view_menu = menubar.addMenu("عرض")
@@ -170,13 +160,9 @@ class ArabicCompilerIDE(QMainWindow):
         
         view_menu.addSeparator()
         
-        symbol_action = QAction("📊 عرض جدول الرموز", self)
-        symbol_action.triggered.connect(self.show_symbol_table)
-        view_menu.addAction(symbol_action)
-        
-        console_action = QAction("🧾 عرض مخرجات التنفيذ", self)
-        console_action.triggered.connect(self.show_console)
-        view_menu.addAction(console_action)
+        codegen_action = QAction("🐍 عرض الكود المولد", self)
+        codegen_action.triggered.connect(self.show_generated_code)
+        view_menu.addAction(codegen_action)
         
         view_menu.addSeparator()
         
@@ -184,24 +170,6 @@ class ArabicCompilerIDE(QMainWindow):
         theme_action.triggered.connect(self.toggle_theme)
         view_menu.addAction(theme_action)
         
-        # قائمة مساعدة
-        help_menu = menubar.addMenu("مساعدة")
-        
-        about_action = QAction("ℹ️ حول البرنامج", self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
-        
-        guide_action = QAction("💡 دليل الاستخدام", self)
-        guide_action.triggered.connect(self.show_guide)
-        help_menu.addAction(guide_action)
-        
-        developer_action = QAction("🧑‍💻 عن المطور", self)
-        developer_action.triggered.connect(self.show_developer)
-        help_menu.addAction(developer_action)
-        
-        contact_action = QAction("🌐 تواصل معنا", self)
-        contact_action.triggered.connect(self.show_contact)
-        help_menu.addAction(contact_action)
         
     def create_main_layout(self):
         """إنشاء التخطيط الرئيسي"""
@@ -251,44 +219,6 @@ class ArabicCompilerIDE(QMainWindow):
         
         sidebar_tabs.addTab(files_widget, "الملفات")
         
-        # تبويب التحليلات
-        analysis_widget = QWidget()
-        analysis_layout = QVBoxLayout(analysis_widget)
-        
-        analysis_label = QLabel("🧠 التحليلات")
-        analysis_label.setAlignment(Qt.AlignCenter)
-        analysis_layout.addWidget(analysis_label)
-        
-        self.analysis_list = QListWidget()
-        self.analysis_list.addItems([
-            "📜 التحليل المعجمي",
-            "🧠 التحليل النحوي", 
-            "🧩 التحليل الدلالي",
-            "📊 جدول الرموز"
-        ])
-        analysis_layout.addWidget(self.analysis_list)
-        
-        sidebar_tabs.addTab(analysis_widget, "التحليلات")
-        
-        # تبويب الإعدادات
-        settings_widget = QWidget()
-        settings_layout = QVBoxLayout(settings_widget)
-        
-        settings_label = QLabel("⚙️ الإعدادات")
-        settings_label.setAlignment(Qt.AlignCenter)
-        settings_layout.addWidget(settings_label)
-        
-        theme_btn = QPushButton("🎨 تبديل النمط")
-        theme_btn.clicked.connect(self.toggle_theme)
-        settings_layout.addWidget(theme_btn)
-        
-        font_btn = QPushButton("🔤 تغيير الخط")
-        font_btn.clicked.connect(self.change_font)
-        settings_layout.addWidget(font_btn)
-        
-        settings_layout.addStretch()
-        
-        sidebar_tabs.addTab(settings_widget, "الإعدادات")
         
         sidebar_layout.addWidget(sidebar_tabs)
         
@@ -405,13 +335,6 @@ class ArabicCompilerIDE(QMainWindow):
             console_font = QFont("Courier New", 10)
         self.console_output.setFont(console_font)
         
-        # رسالة ترحيب
-        welcome_msg = """
-🌟 مرحباً بك في المترجم العربي
-📝 اكتب الكود في المحرر أعلاه واضغط تشغيل
-⚡ سيتم عرض النتائج والتحليلات هنا
-        """
-        self.console_output.setPlainText(welcome_msg.strip())
         
         console_layout.addWidget(self.console_output)
         
@@ -464,32 +387,37 @@ class ArabicCompilerIDE(QMainWindow):
         # ربط قائمة الملفات
         self.files_list.itemClicked.connect(self.on_file_selected)
         
-        # ربط قائمة التحليلات
-        self.analysis_list.itemClicked.connect(self.on_analysis_selected)
-        
         # ربط تغيير النص
         self.text_editor.textChanged.connect(self.on_text_changed)
         
     # وظائف القوائم
     def new_file(self):
         """إنشاء ملف جديد"""
-        if self.text_editor.toPlainText().strip():
-            reply = QMessageBox.question(self, "ملف جديد", 
-                                       "هل تريد حفظ التغييرات الحالية؟",
-                                       QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+        if self.text_editor.toPlainText().strip() and self.text_editor.document().isModified():
+            reply = QMessageBox.question(
+                self, "ملف جديد", 
+                "هل تريد حفظ التغييرات الحالية؟",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+            )
             if reply == QMessageBox.Yes:
                 self.save_file()
             elif reply == QMessageBox.Cancel:
                 return
-                
+        
         self.text_editor.clear()
         self.current_file = None
+        self.current_file_index = -1
+        
         self.file_info_label.setText("ملف جديد")
         self.file_name_label.setText("📁 ملف جديد")
         self.log_to_console("📄 تم إنشاء ملف جديد")
         
+        # إضافة ملف جديد للقائمة (اختياري)
+        # يمكنك حذف هذا الجزء إذا لم ترد إضافة ملفات جديدة للقائمة قبل حفظها
+
+        
     def open_file(self):
-        """فتح ملف"""
+        """فتح ملف وإضافته للقائمة الجانبية"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "فتح ملف", "", 
             "ملفات نصية (*.txt);;ملفات الكود (*.code);;جميع الملفات (*)"
@@ -498,26 +426,112 @@ class ArabicCompilerIDE(QMainWindow):
             try:
                 with open(file_path, 'r', encoding='utf-8') as file:
                     content = file.read()
+                    
+                # التحقق إذا كان الملف مفتوح مسبقاً
+                if file_path in self.open_files:
+                    # الانتقال إلى الملف المفتوح
+                    index = self.open_files.index(file_path)
+                    self.switch_to_file(index)
+                    self.log_to_console(f"📂 الملف مفتوح مسبقاً: {os.path.basename(file_path)}")
+                else:
+                    # إضافة الملف الجديد
                     self.text_editor.setPlainText(content)
                     self.current_file = file_path
+                    
+                    # إضافة للقائمة
+                    self.open_files.append(file_path)
+                    self.current_file_index = len(self.open_files) - 1
+                    
+                    # تحديث القائمة الجانبية
+                    self.update_files_list()
+                    
                     file_name = os.path.basename(file_path)
                     self.file_info_label.setText(file_name)
                     self.file_name_label.setText(f"📁 {file_name}")
                     self.log_to_console(f"📂 تم فتح الملف: {file_name}")
+                    
             except Exception as e:
                 QMessageBox.critical(self, "خطأ", f"لا يمكن فتح الملف:\n{str(e)}")
+
+    def update_files_list(self):
+        """تحديث قائمة الملفات المفتوحة في الشريط الجانبي"""
+        self.files_list.clear()
+        
+        for i, file_path in enumerate(self.open_files):
+            file_name = os.path.basename(file_path)
+            item = QListWidgetItem(f"📄 {file_name}")
+            
+            # تلوين الملف الحالي
+            if i == self.current_file_index:
+                # اللون الأزرق للملف النشط
+                item.setBackground(QColor(52, 152, 219))  # أزرق
+                item.setForeground(QColor(255, 255, 255))  # نص أبيض
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+            
+            # حفظ مسار الملف في البيانات
+            item.setData(Qt.UserRole, file_path)
+            self.files_list.addItem(item)
+
+    def switch_to_file(self, index):
+        """الانتقال إلى ملف معين"""
+        if 0 <= index < len(self.open_files):
+            # حفظ محتوى الملف الحالي إذا كان هناك تغييرات
+            if self.current_file_index >= 0 and self.text_editor.document().isModified():
+                reply = QMessageBox.question(
+                    self, "حفظ التغييرات", 
+                    "هل تريد حفظ التغييرات قبل التبديل؟",
+                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+                )
+                if reply == QMessageBox.Yes:
+                    self.save_file()
+                elif reply == QMessageBox.Cancel:
+                    return
+            
+            # التبديل إلى الملف الجديد
+            file_path = self.open_files[index]
+            try:
+                with open(file_path, 'r', encoding='utf-8') as file:
+                    content = file.read()
+                
+                self.text_editor.setPlainText(content)
+                self.current_file = file_path
+                self.current_file_index = index
+                
+                file_name = os.path.basename(file_path)
+                self.file_info_label.setText(file_name)
+                self.file_name_label.setText(f"📁 {file_name}")
+                
+                # تحديث القائمة لتمييز الملف النشط
+                self.update_files_list()
+                
+                self.log_to_console(f"🔄 تم التبديل إلى: {file_name}")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "خطأ", f"لا يمكن قراءة الملف:\n{str(e)}")
+
                 
     def save_file(self):
-        """حفظ الملف"""
+        """حفظ الملف الحالي"""
         if self.current_file:
+            # الملف موجود، احفظه مباشرة
             try:
                 with open(self.current_file, 'w', encoding='utf-8') as file:
                     file.write(self.text_editor.toPlainText())
-                self.log_to_console(f"💾 تم حفظ الملف: {os.path.basename(self.current_file)}")
+                
+                # إعادة تعيين حالة التعديل
+                self.text_editor.document().setModified(False)
+                
+                file_name = os.path.basename(self.current_file)
+                self.log_to_console(f"💾 تم حفظ الملف: {file_name}")
+                
             except Exception as e:
                 QMessageBox.critical(self, "خطأ", f"لا يمكن حفظ الملف:\n{str(e)}")
         else:
+            # لا يوجد ملف، استخدم حفظ باسم
             self.save_as_file()
+
             
     def save_as_file(self):
         """حفظ الملف باسم جديد"""
@@ -529,13 +543,35 @@ class ArabicCompilerIDE(QMainWindow):
             try:
                 with open(file_path, 'w', encoding='utf-8') as file:
                     file.write(self.text_editor.toPlainText())
-                    self.current_file = file_path
-                    file_name = os.path.basename(file_path)
-                    self.file_info_label.setText(file_name)
-                    self.file_name_label.setText(f"📁 {file_name}")
-                    self.log_to_console(f"💾 تم حفظ الملف باسم: {file_name}")
+                
+                # تحديث المسار الحالي
+                old_file = self.current_file
+                self.current_file = file_path
+                
+                # تحديث القائمة
+                if old_file and old_file in self.open_files:
+                    # استبدال المسار القديم بالجديد
+                    index = self.open_files.index(old_file)
+                    self.open_files[index] = file_path
+                else:
+                    # إضافة ملف جديد
+                    self.open_files.append(file_path)
+                    self.current_file_index = len(self.open_files) - 1
+                
+                # تحديث الواجهة
+                file_name = os.path.basename(file_path)
+                self.file_info_label.setText(file_name)
+                self.file_name_label.setText(f"📁 {file_name}")
+                self.update_files_list()
+                
+                # إعادة تعيين حالة التعديل
+                self.text_editor.document().setModified(False)
+                
+                self.log_to_console(f"💾 تم حفظ الملف باسم: {file_name}")
+                
             except Exception as e:
                 QMessageBox.critical(self, "خطأ", f"لا يمكن حفظ الملف:\n{str(e)}")
+
                 
     def print_file(self):
         """طباعة الملف"""
@@ -574,11 +610,15 @@ class ArabicCompilerIDE(QMainWindow):
         if reply == QMessageBox.Yes:
             self.text_editor.clear()
             self.log_to_console("🧹 تم مسح كل النص")
-            
+
+
+    
     # وظائف التشغيل
     def run_code(self):
         """تشغيل الكود مباشرة من الواجهة"""
         try:
+            self.is_running = True
+
             # مسح الكونسول
             self.console_output.clear()
             
@@ -588,13 +628,7 @@ class ArabicCompilerIDE(QMainWindow):
                 self.console_output.setPlainText("❌ لا يوجد كود للتشغيل!")
                 return
             
-            # استيراد المكتبات الضرورية
-            from antlr4 import InputStream, CommonTokenStream
-            from ArabicGrammarLexer import ArabicGrammarLexer
-            from ArabicGrammarParser import ArabicGrammarParser
-            from semantic_analyzer import SemanticAnalyzer
-            from code_generator import CodeGenerator
-            
+           
             # التحليل اللغوي
             input_stream = InputStream(source_code)
             lexer = ArabicGrammarLexer(input_stream)
@@ -622,6 +656,7 @@ class ArabicCompilerIDE(QMainWindow):
             
         except Exception as e:
             self.console_output.setPlainText(f"❌ خطأ في التنفيذ:\n{str(e)}")
+    
     def execute_generated_code(self, python_code):
         """تنفيذ الكود البايثون المولد داخل الواجهة"""
         import io
@@ -648,6 +683,7 @@ class ArabicCompilerIDE(QMainWindow):
                 
         except Exception as e:
             self.console_output.insertPlainText(f"\n❌ خطأ في التنفيذ: {str(e)}\n")
+    
     def console_print(self, *args, **kwargs):
         """دالة طباعة مخصصة للكونسول"""
         # تحويل كل المدخلات إلى نص
@@ -667,103 +703,267 @@ class ArabicCompilerIDE(QMainWindow):
         # تحديث الواجهة
         QApplication.processEvents()
 
-    def run_code1(self):
-        """تشغيل الكود"""
-        code = self.text_editor.toPlainText().strip()
-        if not code:
-            self.log_to_console("⚠️ لا يوجد كود للتشغيل", "warning")
-            return
-            
-        self.status_label.setText("🔄 جارٍ التحليل...")
-        self.log_to_console("▶️ بدء تحليل الكود...")
-        # حاول استدعاء المترجم الحقيقي من ملف main1.py
-        try:
-            success, generated_code, ast, errors, captured = self.run_compiler_and_capture(code)
-
-            # أظهر ناتج المترجم (التحليلات والمخرجات)
-            if captured:
-                for line in captured.splitlines():
-                    self.log_to_console(line, "output")
-
-            if errors:
-                for err in errors:
-                    # قد يكون err عبارة عن كائن أو نص
-                    try:
-                        msg = err.format_error()
-                    except Exception:
-                        msg = str(err)
-                    self.log_to_console(msg, "error")
-
-            if not success:
-                self.log_to_console("✗ فشل التجميع أو التنفيذ", "error")
-        except Exception as e:
-            # إن لم يتوفر المترجم، استمر مع المحاكاة القديمة
-            self.log_to_console(f"⚠️ تعذر تشغيل المترجم الحقيقي: {e}")
-            # محاكاة التحليل المعجمي
-            self.simulate_lexical_analysis(code)
-            
-            # محاكاة التحليل النحوي
-            self.simulate_syntax_analysis(code)
-            
-            # محاكاة التحليل الدلالي
-            self.simulate_semantic_analysis(code)
-            
-            # محاكاة التنفيذ
-            self.simulate_execution(code)
-        
-        self.status_label.setText("🟢 جاهز")
-        
+   
     def stop_execution(self):
         """إيقاف التنفيذ"""
-        self.log_to_console("🛑 تم إيقاف التنفيذ", "error")
-        self.status_label.setText("🟢 جاهز")
-        
-    def run_settings(self):
-        """إعدادات التشغيل"""
-        QMessageBox.information(self, "إعدادات التشغيل", 
-                              "إعدادات التشغيل ستكون متاحة في الإصدار القادم")
-        
-    # وظائف العرض
-    def show_lexical_analysis(self):
-        """عرض التحليل المعجمي"""
-        code = self.text_editor.toPlainText().strip()
-        if code:
-            self.simulate_lexical_analysis(code)
+        if self.is_running:
+            self.is_running = False
+            
+            # إيقاف العملية إذا كانت موجودة
+            if self.running_process:
+                try:
+                    self.running_process.terminate()
+                    self.running_process = None
+                except:
+                    pass
+            
+            self.log_to_console("🛑 تم إيقاف التنفيذ", "error")
+            
         else:
+            self.log_to_console("⚠️ لا يوجد تنفيذ قيد العمل", "warning")
+        
+
+        
+    
+    def show_lexical_analysis(self):
+        """عرض التحليل المعجمي الفعلي"""
+        code = self.text_editor.toPlainText().strip()
+        if not code:
             self.log_to_console("⚠️ لا يوجد كود للتحليل", "warning")
+            return
+        
+        try:
+            # الحصول على التحليل المعجمي الفعلي
+            result = get_lexical_analysis(code)
+            
+            self.log_to_console("📜 ═══════════════ التحليل المعجمي ═══════════════")
+            
+            if result['success']:
+                self.log_to_console(f"✅ تم التحليل بنجاح - عدد الرموز: {result['token_count']}")
+                self.log_to_console("")
+                self.log_to_console("الرموز المستخرجة:")
+                self.log_to_console("─" * 70)
+                
+                for i, token in enumerate(result['tokens'], 1):
+                    token_line = f"{i}. [{token['type']}] '{token['text']}' (سطر: {token['line']}, عمود: {token['column']})"
+                    self.log_to_console(token_line)
+                
+                self.log_to_console("─" * 70)
+                self.log_to_console(f"✅ إجمالي الرموز: {len(result['tokens'])}")
+            else:
+                self.log_to_console(f"❌ خطأ في التحليل المعجمي: {result.get('error', 'خطأ غير معروف')}", "error")
+            
+        except Exception as e:
+            self.log_to_console(f"❌ خطأ في التحليل المعجمي: {str(e)}", "error")
+
             
     def show_syntax_analysis(self):
-        """عرض التحليل النحوي"""
+        """عرض التحليل النحوي الفعلي بشكل منسق"""
         code = self.text_editor.toPlainText().strip()
-        if code:
-            self.simulate_syntax_analysis(code)
-        else:
+        if not code:
             self.log_to_console("⚠️ لا يوجد كود للتحليل", "warning")
+            return
+        
+        try:
+            # الحصول على التحليل النحوي الفعلي
+            result = get_syntax_analysis(code)
+            
+            self.log_to_console("🧠 ═══════════════ التحليل النحوي ═══════════════")
+            
+            if result['success']:
+                self.log_to_console("✅ التحليل النحوي ناجح - لا توجد أخطاء نحوية")
+                self.log_to_console("")
+                self.log_to_console("🌲 شجرة التحليل النحوي (Parse Tree):")
+                self.log_to_console("─" * 70)
+                
+                if result.get('tree_formatted'):
+                    # عرض الشجرة المنسقة
+                    for line in result['tree_formatted']:
+                        self.log_to_console(line)
+                elif result.get('tree_raw'):
+                    # fallback للعرض الخام إذا فشل التنسيق
+                    self.log_to_console("📋 العرض الخام للشجرة:")
+                    tree_lines = result['tree_raw'].split('\n')
+                    for line in tree_lines[:30]:  # عرض أول 30 سطر
+                        self.log_to_console(line)
+                    
+                    if len(tree_lines) > 30:
+                        self.log_to_console(f"... ({len(tree_lines) - 30} سطر إضافي)")
+                
+                self.log_to_console("─" * 70)
+                self.log_to_console("✅ البنية النحوية صحيحة")
+            else:
+                self.log_to_console(f"❌ عدد الأخطاء النحوية: {result.get('error_count', 0)}", "error")
+                if 'error' in result:
+                    self.log_to_console(f"❌ {result['error']}", "error")
+            
+        except Exception as e:
+            self.log_to_console(f"❌ خطأ في التحليل النحوي: {str(e)}", "error")
+
+
             
     def show_semantic_analysis(self):
-        """عرض التحليل الدلالي"""
+        """عرض التحليل الدلالي الفعلي بشكل شامل (بدون جدول الرموز)"""
         code = self.text_editor.toPlainText().strip()
-        if code:
-            self.simulate_semantic_analysis(code)
-        else:
+        if not code:
             self.log_to_console("⚠️ لا يوجد كود للتحليل", "warning")
-            
-    def show_symbol_table(self):
-        """عرض جدول الرموز"""
-        self.log_to_console("📊 جدول الرموز:")
-        self.log_to_console("┌─────────────┬──────────┬─────────┐")
-        self.log_to_console("│    الرمز    │  النوع   │ القيمة  │")
-        self.log_to_console("├─────────────┼──────────┼─────────┤")
-        self.log_to_console("│    عدد      │  متغير   │   ١٠    │")
-        self.log_to_console("│   نص       │  متغير   │ 'مرحبا'  │")
-        self.log_to_console("│  طباعة     │  دالة    │   -     │")
-        self.log_to_console("└─────────────┴──────────┴─────────┘")
+            return
         
-    def show_console(self):
-        """إظهار وحدة التحكم"""
-        if self.vertical_splitter.sizes()[1] == 0:
-            self.vertical_splitter.setSizes([500, 150])
-        self.log_to_console("🧾 تم إظهار وحدة التحكم")
+        try:
+            # الحصول على التحليل الدلالي الفعلي
+            result = get_semantic_analysis(code)
+            
+            self.log_to_console("🧩 ═══════════════════════════════════════════════════")
+            self.log_to_console("         التحليل الدلالي - Semantic Analysis")
+            self.log_to_console("═══════════════════════════════════════════════════")
+            self.log_to_console("")
+            
+            # ═══════════ القسم 1: الحالة العامة ═══════════
+            if result['success']:
+                self.log_to_console("✅ التحليل الدلالي ناجح - لا توجد أخطاء دلالية")
+            else:
+                self.log_to_console(f"❌ فشل التحليل الدلالي - عدد الأخطاء: {len(result['errors'])}", "error")
+            
+            self.log_to_console("")
+            self.log_to_console("─" * 70)
+            
+            # ═══════════ القسم 2: الإحصائيات ═══════════
+            if 'statistics' in result and result['statistics']:
+                self.log_to_console("")
+                self.log_to_console("📊 إحصائيات التحليل الدلالي:")
+                self.log_to_console("─" * 70)
+                stats = result['statistics']
+                self.log_to_console(f"  📌 إجمالي الرموز المعرفة: {stats['total_symbols']}")
+                self.log_to_console(f"  📊 المتغيرات: {stats['variables']}")
+                self.log_to_console(f"  🔒 الثوابت: {stats['constants']}")
+                self.log_to_console(f"  ⚙️ الإجراءات: {stats['procedures']}")
+                self.log_to_console(f"  📝 المعاملات: {stats['parameters']}")
+                self.log_to_console(f"  🏷️ الأنواع المخصصة: {stats['types']}")
+                self.log_to_console(f"  ❌ الأخطاء الدلالية: {stats['total_errors']}")
+                self.log_to_console("─" * 70)
+            
+            # ═══════════ القسم 3: شجرة AST ═══════════
+            if result.get('ast_formatted'):
+                self.log_to_console("")
+                self.log_to_console("🌳 شجرة البناء المجردة (Abstract Syntax Tree - AST):")
+                self.log_to_console("─" * 70)
+                self.log_to_console("الشجرة بعد الإثراء الدلالي (Semantic Enrichment):")
+                self.log_to_console("")
+                
+                for line in result['ast_formatted']:
+                    self.log_to_console(line)
+                
+                self.log_to_console("─" * 70)
+                self.log_to_console("✅ تم بناء شجرة AST بنجاح")
+            
+            # ═══════════ القسم 4: تقرير الأخطاء الدلالية ═══════════
+            if result.get('errors_formatted') and len(result['errors_formatted']) > 0:
+                self.log_to_console("")
+                self.log_to_console("❌ تقرير الأخطاء الدلالية (Semantic Error Report):", "error")
+                self.log_to_console("─" * 70)
+                
+                for error in result['errors_formatted']:
+                    self.log_to_console("", "error")
+                    self.log_to_console(f"🔴 خطأ رقم {error['number']}:", "error")
+                    self.log_to_console(f"   النوع: {error.get('type', 'غير محدد')}", "error")
+                    self.log_to_console(f"   الرسالة: {error['message']}", "error")
+                    
+                    if error.get('line'):
+                        self.log_to_console(f"   الموقع: السطر {error['line']}", "error")
+                        if error.get('column'):
+                            self.log_to_console(f"            العمود {error['column']}", "error")
+                    
+                    self.log_to_console(f"   الخطورة: {error['severity']}", "error")
+                    self.log_to_console("   " + "─" * 60, "error")
+                
+                self.log_to_console("")
+                self.log_to_console(f"❌ إجمالي الأخطاء: {len(result['errors_formatted'])}", "error")
+            elif result['success']:
+                self.log_to_console("")
+                self.log_to_console("✅ لا توجد أخطاء دلالية - البرنامج صحيح دلالياً")
+            
+            # ═══════════ القسم 5: ملخص التحليل ═══════════
+            self.log_to_console("")
+            self.log_to_console("═══════════════════════════════════════════════════")
+            self.log_to_console("                   ملخص التحليل")
+            self.log_to_console("═══════════════════════════════════════════════════")
+            
+            if result['success']:
+                self.log_to_console("✅ اكتمل التحليل الدلالي بنجاح", "success")
+                self.log_to_console("✓ تم بناء شجرة AST")
+                self.log_to_console("✓ تم التحقق من الأنواع")
+                self.log_to_console("✓ تم التحقق من النطاقات")
+                self.log_to_console("✓ البرنامج جاهز لتوليد الكود")
+            else:
+                self.log_to_console("❌ فشل التحليل الدلالي - يرجى تصحيح الأخطاء", "error")
+            
+            self.log_to_console("═══════════════════════════════════════════════════")
+            
+        except Exception as e:
+            self.log_to_console(f"❌ خطأ في التحليل الدلالي: {str(e)}", "error")
+
+            
+    
+    def show_generated_code(self):
+        """عرض الكود المولد (Python Code Generation)"""
+        code = self.text_editor.toPlainText().strip()
+        if not code:
+            self.log_to_console("⚠️ لا يوجد كود لتوليده", "warning")
+            return
+        
+        try:
+            # استيراد دالة توليد الكود
+            from compiler_analyzer import generate_intermediate_code
+            
+            # توليد الكود
+            result = generate_intermediate_code(code)
+            
+            self.log_to_console("🐍 ═══════════════════════════════════════════════════")
+            self.log_to_console("         توليد الكود - Code Generation")
+            self.log_to_console("═══════════════════════════════════════════════════")
+            self.log_to_console("")
+            
+            if result['success']:
+                self.log_to_console("✅ تم توليد الكود بنجاح")
+                self.log_to_console("")
+                self.log_to_console("📝 الكود المولد (Python Code):")
+                self.log_to_console("─" * 70)
+                self.log_to_console("")
+                
+                # عرض الكود المولد مع أرقام الأسطر
+                generated_code = result['code']
+                lines = generated_code.split('\n')
+                
+                for i, line in enumerate(lines, 1):
+                    # إضافة رقم السطر
+                    line_num = f"{i:3d} │ "
+                    self.log_to_console(line_num + line)
+                
+                self.log_to_console("")
+                self.log_to_console("─" * 70)
+                self.log_to_console(f"✅ عدد الأسطر المولدة: {len(lines)}")
+                self.log_to_console("")
+                self.log_to_console("💡 ملاحظة: هذا الكود جاهز للتنفيذ في بيئة Python")
+                
+            else:
+                self.log_to_console("❌ فشل توليد الكود", "error")
+                self.log_to_console("")
+                
+                if 'errors' in result and result['errors']:
+                    self.log_to_console("قائمة الأخطاء:", "error")
+                    for i, error in enumerate(result['errors'], 1):
+                        self.log_to_console(f"  {i}. {error}", "error")
+                
+                if 'error' in result:
+                    self.log_to_console(f"تفاصيل الخطأ: {result['error']}", "error")
+            
+            self.log_to_console("")
+            self.log_to_console("═══════════════════════════════════════════════════")
+            
+        except Exception as e:
+            self.log_to_console(f"❌ خطأ في توليد الكود: {str(e)}", "error")
+
+        
         
     def toggle_theme(self):
         """تبديل النمط"""
@@ -775,222 +975,6 @@ class ArabicCompilerIDE(QMainWindow):
             self.apply_light_theme()
             self.log_to_console("☀️ تم تطبيق النمط الفاتح")
             
-    # وظائف المساعدة
-    def show_about(self):
-        """حول البرنامج"""
-        about_text = """
-        <div style='text-align: center; direction: rtl;'>
-        <h2>🌟 المترجم العربي</h2>
-        <h3>Arabic Compiler IDE</h3>
-        <p><b>الإصدار:</b> 1.0</p>
-        <p><b>التاريخ:</b> أكتوبر 2024</p>
-        <br>
-        <p>محاكي لبيئة تطوير متكاملة باللغة العربية</p>
-        <p>يدعم الكتابة من اليمين لليسار والواجهة العربية الكاملة</p>
-        <br>
-        <p><b>المطور:</b> فريق المترجم العربي</p>
-        <p><b>حقوق النشر:</b> © 2024 جميع الحقوق محفوظة</p>
-        </div>
-        """
-        QMessageBox.about(self, "حول البرنامج", about_text)
-        
-    def show_guide(self):
-        """دليل الاستخدام"""
-        guide_text = """
-        دليل الاستخدام السريع:
-        
-        🔸 كتابة الكود: استخدم منطقة المحرر لكتابة الكود العربي
-        🔸 التشغيل: اضغط F5 أو زر "تشغيل" لتحليل الكود
-        🔸 الحفظ: استخدم Ctrl+S لحفظ الملف
-        🔸 التحليلات: استخدم قائمة "عرض" لإظهار التحليلات المختلفة
-        🔸 النمط: يمكنك تبديل النمط الفاتح/الداكن من قائمة "عرض"
-        
-        للمزيد من المساعدة، راجع قائمة "مساعدة"
-        """
-        QMessageBox.information(self, "دليل الاستخدام", guide_text)
-        
-    def show_developer(self):
-        """عن المطور"""
-        dev_text = """
-        🧑‍💻 فريق تطوير المترجم العربي
-        
-        تم تطوير هذا البرنامج كمشروع تعليمي لمحاكاة 
-        بيئة التطوير المتكاملة باللغة العربية
-        
-        الهدف: تسهيل تعلم البرمجة باللغة العربية
-        التقنيات: Python + PyQt5
-        
-        نسعى لتطوير البرمجة العربية! 🚀
-        """
-        QMessageBox.information(self, "عن المطور", dev_text)
-        
-    def show_contact(self):
-        """تواصل معنا"""
-        contact_text = """
-        🌐 للتواصل معنا:
-        
-        📧 البريد الإلكتروني: info@arabic-compiler.com
-        🐙 GitHub: github.com/arabic-compiler
-        🌐 الموقع: www.arabic-compiler.com
-        📱 تويتر: @ArabicCompiler
-        
-        نرحب بملاحظاتكم واقتراحاتكم! 💙
-        """
-        QMessageBox.information(self, "تواصل معنا", contact_text)
-        
-    # وظائف المحاكاة
-    def simulate_lexical_analysis(self, code):
-        """محاكاة التحليل المعجمي"""
-        self.log_to_console("📜 بدء التحليل المعجمي...")
-        
-        # كلمات مفتاحية عربية
-        arabic_keywords = ['إعلان', 'متغير', 'طباعة', 'إذا', 'وإلا', 'كرر', 'دالة', 'إرجاع']
-        
-        tokens = []
-        words = code.split()
-        
-        for word in words:
-            if word in arabic_keywords:
-                tokens.append(f"KEYWORD: {word}")
-            elif word.isdigit() or any(c in '١٢٣٤٥٦٧٨٩٠' for c in word):
-                tokens.append(f"NUMBER: {word}")
-            elif word.startswith('"') and word.endswith('"'):
-                tokens.append(f"STRING: {word}")
-            elif word in ['=', '+', '-', '*', '/']:
-                tokens.append(f"OPERATOR: {word}")
-            else:
-                tokens.append(f"IDENTIFIER: {word}")
-                
-        self.log_to_console("الرموز المستخرجة:")
-        for token in tokens[:10]:  # عرض أول 10 رموز
-            self.log_to_console(f"  • {token}")
-            
-        if len(tokens) > 10:
-            self.log_to_console(f"  ... و {len(tokens) - 10} رموز أخرى")
-            
-        self.log_to_console("✅ اكتمل التحليل المعجمي بنجاح")
-        
-    def simulate_syntax_analysis(self, code):
-        """محاكاة التحليل النحوي"""
-        self.log_to_console("🧠 بدء التحليل النحوي...")
-        
-        lines = code.split('\n')
-        errors = []
-        
-        for i, line in enumerate(lines, 1):
-            line = line.strip()
-            if not line:
-                continue
-                
-            # فحص بسيط للبناء النحوي
-            if line.startswith('إعلان'):
-                if '=' not in line:
-                    errors.append(f"السطر {i}: مطلوب تعيين قيمة للمتغير")
-            elif line.startswith('طباعة'):
-                if '(' not in line or ')' not in line:
-                    errors.append(f"السطر {i}: مطلوب أقواس للدالة طباعة")
-                    
-        if errors:
-            self.log_to_console("❌ أخطاء نحوية:", "error")
-            for error in errors:
-                self.log_to_console(f"  • {error}", "error")
-        else:
-            self.log_to_console("✅ لا توجد أخطاء نحوية")
-            self.log_to_console("الشجرة النحوية:")
-            self.log_to_console("  Program")
-            self.log_to_console("  ├── Declarations")
-            self.log_to_console("  └── Statements")
-            
-        self.log_to_console("✅ اكتمل التحليل النحوي")
-        
-    def simulate_semantic_analysis(self, code):
-        """محاكاة التحليل الدلالي"""
-        self.log_to_console("🧩 بدء التحليل الدلالي...")
-        
-        # فحص دلالي بسيط
-        declared_vars = []
-        used_vars = []
-        
-        lines = code.split('\n')
-        for line in lines:
-            line = line.strip()
-            if line.startswith('إعلان متغير'):
-                parts = line.split()
-                if len(parts) >= 3:
-                    var_name = parts[2]
-                    declared_vars.append(var_name)
-            elif 'طباعة' in line:
-                # استخراج المتغيرات المستخدمة
-                import re
-                vars_in_line = re.findall(r'\b[أ-ي]+\b', line)
-                for var in vars_in_line:
-                    if var not in ['طباعة']:
-                        used_vars.append(var)
-                        
-        # فحص المتغيرات غير المعرفة
-        undefined_vars = [var for var in used_vars if var not in declared_vars]
-        
-        if undefined_vars:
-            self.log_to_console("⚠️ تحذيرات دلالية:", "warning")
-            for var in undefined_vars:
-                self.log_to_console(f"  • المتغير '{var}' مستخدم بدون تعريف", "warning")
-        else:
-            self.log_to_console("✅ لا توجد أخطاء دلالية")
-            
-        self.log_to_console("المتغيرات المعرفة:", "success")
-        for var in declared_vars:
-            self.log_to_console(f"  • {var}", "success")
-            
-        self.log_to_console("✅ اكتمل التحليل الدلالي")
-        
-    def simulate_execution(self, code):
-        """محاكاة التنفيذ"""
-        self.log_to_console("⚡ بدء التنفيذ...")
-        
-        lines = code.split('\n')
-        variables = {}
-        
-        for i, line in enumerate(lines, 1):
-            line = line.strip()
-            if not line:
-                continue
-                
-            try:
-                if line.startswith('إعلان متغير'):
-                    # تحليل تعريف المتغير
-                    parts = line.split(' = ')
-                    if len(parts) == 2:
-                        var_info = parts[0].split()
-                        if len(var_info) >= 3:
-                            var_name = var_info[2]
-                            value = parts[1]
-                            
-                            # تحويل الأرقام العربية
-                            arabic_to_english = str.maketrans('١٢٣٤٥٦٧٨٩٠', '1234567890')
-                            value = value.translate(arabic_to_english)
-                            
-                            if value.isdigit():
-                                variables[var_name] = int(value)
-                            else:
-                                variables[var_name] = value.strip('"\'')
-                                
-                            self.log_to_console(f"تم تعيين {var_name} = {variables[var_name]}", "success")
-                            
-                elif line.startswith('طباعة'):
-                    # تحليل أمر الطباعة
-                    content = line[line.find('(')+1:line.rfind(')')]
-                    if content in variables:
-                        output = variables[content]
-                    else:
-                        output = content.strip('"\'')
-                        
-                    self.log_to_console(f"📤 المخرجات: {output}", "output")
-                    
-            except Exception as e:
-                self.log_to_console(f"❌ خطأ في السطر {i}: {str(e)}", "error")
-                
-        self.log_to_console("✅ اكتمل التنفيذ بنجاح")
-
     def run_compiler_and_capture(self, code):
         """استدعي الدالة compile_and_run من main1 واحتجز مخرجات stdout/stderr (بما في ذلك مخرجات العمليات الفرعية).
 
@@ -1077,17 +1061,16 @@ class ArabicCompilerIDE(QMainWindow):
         current_time = datetime.now().strftime(" %H:%M:%S")
         self.time_label.setText(current_time)
         
-    def change_font(self):
-        """تغيير خط المحرر"""
-        font, ok = QFontDialog.getFont(self.text_editor.font(), self)
-        if ok:
-            self.text_editor.setFont(font)
-            self.console_output.setFont(font)
-            self.log_to_console(f"🔤 تم تغيير الخط إلى: {font.family()}")
-            
+        
     def on_file_selected(self, item):
-        """عند اختيار ملف من القائمة"""
-        self.log_to_console(f"📂 تم اختيار الملف: {item.text()}")
+        """معالج اختيار ملف من القائمة الجانبية"""
+        # الحصول على مسار الملف من البيانات
+        file_path = item.data(Qt.UserRole)
+        
+        if file_path and file_path in self.open_files:
+            index = self.open_files.index(file_path)
+            self.switch_to_file(index)
+
         
     def on_analysis_selected(self, item):
         """عند اختيار تحليل من القائمة"""
@@ -1372,6 +1355,7 @@ class ArabicCompilerIDE(QMainWindow):
         
         self.setStyleSheet(light_style)
         self.theme_toggle_btn.setText("🌙")
+    
     def eventFilter(self, obj, event):
         """معالج الأحداث للكونسول - للإدخال التفاعلي"""
         if obj == self.console_output and self.waiting_for_input:
@@ -1393,6 +1377,7 @@ class ArabicCompilerIDE(QMainWindow):
                     self.input_buffer += event.text()
             return False
         return super().eventFilter(obj, event)
+    
     def console_input(self, prompt=""):
         """دالة الإدخال من الكونسول - تحاكي input()"""
         from PyQt5.QtCore import QEventLoop
