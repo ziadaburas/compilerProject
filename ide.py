@@ -980,12 +980,8 @@ class ArabicCompilerIDE(QMainWindow):
 
         Returns: (success, generated_code, ast, errors, captured_output_str)
         """
-        try:
-            import main1
-        except Exception as e:
-            raise ImportError(f"تعذر استيراد main1: {e}")
-
-        import sys, os
+        
+        
 
         # افتح قناة لقراءة ما سيكتب على مستوى النظام (file descriptor)
         r_fd, w_fd = os.pipe()

@@ -1,18 +1,3 @@
-/**
- * ANTLR4 Grammar for the Arabic Programming Language
- Based on the rules provided by Dr. Khalid M.
- * Al-Kahsah.
- This grammar defines the structure of the language, from the overall program
- down
- * to
- expressions and individual tokens.
- By Engineer : Tareq Al-Omari
- */
-grammar ArabicGrammar;
-
-// ------------------------------------------------------------------ # Parser Rules
-// ------------------------------------------------------------------
-
 program: PROGRAM ID SEMICOLON block DOT; // بداية البرنامج
 
 block: definitions_part instructions_list;
